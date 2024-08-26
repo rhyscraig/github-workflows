@@ -68,6 +68,10 @@ jobs:
           ssh-agent -a $SSH_AUTH_SOCK > /dev/null
           ssh-add /home/runner/.ssh/github_actions
 
+      - name: Terraform Init
+        run: terraform init -backend=false
+        working-directory: ${{ inputs.base_dir }}
+
       - name: Terraform Validate
         run: |
           terraform init -backend=false
