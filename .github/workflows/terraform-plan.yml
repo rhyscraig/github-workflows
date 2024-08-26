@@ -16,16 +16,17 @@ on:
         type: string
         required: true
         description: "What AWS env to deploy to"
+        default: "prd"
       state_bucket:
         type: string
         required: false
         description: "What S3 bucket to use for terraform state files"
-        default: "none"
+        default: "terraform-tfstate-bucket-395101865577"
       state_bucket_region:
         type: string
         required: false
         description: "What region the state bucket is in"
-        default: "cpe-control-repo-platform-ets-app-workloads-master-eu-west-1"
+        default: "eu-west-2"
       terraform_version:
         type: string
         required: false
