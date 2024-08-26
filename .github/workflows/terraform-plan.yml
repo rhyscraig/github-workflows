@@ -133,7 +133,7 @@ jobs:
         run: |
           # Extract values from environment or configuration
           ACCOUNT_ID=$(echo "${{ steps.load_config.outputs.role_to_assume }}" | cut -d':' -f5)
-          AWS_TF_STATE_PATH="${{ steps.load_config.outputs.state_bucket_path }}" # Ensure this is correct and not empty
+          AWS_TF_STATE_PATH="${{ inputs.state_bucket_path }}" # Ensure this is correct and not empty
           
           # Ensure the path variable is not empty
           if [ -z "$AWS_TF_STATE_PATH" ]; then
