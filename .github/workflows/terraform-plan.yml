@@ -17,6 +17,11 @@ on:
         required: false
         description: "Dynamodb state locking table"
         default: "tf-lock-state-ddb-table"
+      dynamodb_table_region:
+        type: string
+        required: false
+        description: "Dynamodb table region"
+        default: "us-east-1"
       environment:
         type: string
         required: true
@@ -36,7 +41,7 @@ on:
         type: string
         required: false
         description: "What region the state bucket is in"
-        default: "eu-west-2"
+        default: "us-east-1"
       terraform_version:
         type: string
         required: false
