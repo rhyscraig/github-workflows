@@ -39,7 +39,7 @@ on:
         default: "~1.6.0"
 
 env:
-  SSH_AUTH_SOCK: /temp/ssh_agent.sock
+  SSH_AUTH_SOCK: /tmp/ssh_agent.sock
   SSH_KEY: ${{ secrets.GH_ACTIONS_SERVICE_USER_SSH_KEY }}
 
 jobs:
@@ -50,12 +50,24 @@ jobs:
       id-token: write
       contents: write
     steps:
+      # Check if on default branch
       - name: Check if on default branch
         if: github.ref_name != github.event.repository.default_branch
         run: |
           job_summary="### Job failed :warning:\nThis workflow is intended to run only on the default branch (${{ github.event.repository.default_branch }}). Exiting because it is running on branch ${{ github.ref_name }}."
           echo -e "$job_summary" >> $GITHUB_STEP_SUMMARY
           exit 1
+
+      # Cache Terraform modules and providers
+      - name: Cache Terraform Modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.terraform.d/plugin-cache
+            .terraform
+          key: ${{ runner.os }}-terraform-${{ hashFiles('**/*.tf') }}
+          restore-keys: |
+            ${{ runner.os }}-terraform-
 
       # Check out repo
       - uses: actions/checkout@v4
@@ -64,7 +76,11 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ inputs.terraform_version }}
-      
+
+      # Terraform Validate
+      - name: Terraform Validate
+        run: terraform validate
+
       # Load environment configurations
       - name: Load environment-specific configuration
         id: load_config
@@ -150,6 +166,7 @@ jobs:
       # Run Terraform plan   
       - name: Terraform Plan
         run: |
+
           TFCMD="terraform plan -out ${{ github.event.repository.name }}-${{ inputs.environment }}.out"
           if [ -n "${{ env.tfvars_path }}" ]; then
             TFCMD="$TFCMD -var-file=${{ env.tfvars_path }}"
@@ -188,6 +205,16 @@ jobs:
     needs: plan
     environment: manual_approval
     steps:
+      # Cache Terraform modules and providers
+      - name: Cache Terraform Modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.terraform.d/plugin-cache
+            .terraform
+          key: ${{ runner.os }}-terraform-${{ hashFiles('**/*.tf') }}
+          restore-keys: |
+            ${{ runner.os }}-terraform-
 
       # Check out repo
       - uses: actions/checkout@v4
@@ -244,12 +271,18 @@ jobs:
       # Add SSH key to allow us to clone
       - name: Set up SSH Private Key
         run: |
-            mkdir -p /home/runner/.ssh
-            ssh-keyscan github.com >> /home/runner/.ssh/known_hosts
-            echo "${{ env.SSH_KEY }}" > /home/runner/.ssh/github_actions
-            chmod 600 /home/runner/.ssh/github_actions
-            ssh-agent -a $SSH_AUTH_SOCK > /dev/null
-            ssh-add /home/runner/.ssh/github_actions
+          mkdir -p /home/runner/.ssh
+          ssh-keyscan github.com >> /home/runner/.ssh/known_hosts
+          echo "${{ env.SSH_KEY }}" > /home/runner/.ssh/github_actions
+          chmod 600 /home/runner/.ssh/github_actions
+          ssh-agent -a $SSH_AUTH_SOCK > /dev/null
+          ssh-add /home/runner/.ssh/github_actions
+
+      # Download Terraform Plan from Artifact
+      - name: Download Plan Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ github.event.repository.name }}-${{ inputs.environment }}
 
       # Initialise Terraform in path
       - name: Terraform Init
@@ -262,27 +295,13 @@ jobs:
             -backend-config "key=$AWS_TF_STATE_PATH" \
             -backend-config "encrypt=true"
 
-       # Download Terraform Plan output
-       - name: Download Terraform Plan output
-         uses: actions/downoad-artifact@v4
-         with: 
-            name: ${{ github.event.repository.name }}-${{ inputs.environment }}
-
-       # Run Terraform Apply and Capture output
-       - name: Terraform Apply
-         run: |
-           output=$(mktemp)
-           terraform apply -auto-approve -no-color ${{ github.event.repository.name }}.out 2>&1 | tee "output"
-           if [[ ${PIPESTATUS[0]} -ne 0]]; then
-             echo "#### Terraform Apply Failed" >> $GITHUB_STEP_SUMMARY
-             echo '```' >> $GITHUB_STEP_SUMMARY
-             cat "$output" >> $GITHUB_STEP_SUMMARY
-             ECHO '```' >> $GITHUB_STEP_SUMMARY
-             exit 1
-           else
-             echo "#### Terraform apply succeeded" >> $GITHUB_STEP_SUMMARY
-             echo "Release Hash: $(echo '${{ github.sha }}') | cut -c1-7)" >> $GITHUB_STEP_SUMMARY
-             echo '```' >> $GITHUB_STEP_SUMMARY
-             cat "$output" >> $GITHUB_STEP_SUMMARY
-             ECHO '```' >> $GITHUB_STEP_SUMMARY
-           fi
+      # Run Terraform Apply
+      - name: Terraform Apply
+        run: |
+          echo "Starting Terraform Apply..."
+          terraform apply -parallelism=${{ inputs.parallelism }} -auto-approve -no-color ${{ github.event.repository.name }}-${{ inputs.environment }}.out
+          if [[ $? -ne 0 ]]; then
+            echo "Terraform Apply Failed!"
+            exit 1
+          fi
+          echo "Terraform Apply Succeeded!"

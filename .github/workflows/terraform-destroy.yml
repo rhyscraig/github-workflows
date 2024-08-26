@@ -1,0 +1,257 @@
+name: Terraform Destroy
+
+on:
+  workflow_call:
+    inputs:
+      aws_region:
+        type: string
+        required: false
+        description: "What region do we wish to run AWS auth in"
+        default: "eu-west-2"
+      code_owner:
+        type: string
+        required: false
+        description: "Which organization owns the code to deploy"
+      environment:
+        type: string
+        required: true
+        description: "What AWS env to deploy to"
+        default: "none"
+      parallelism:
+        type: string
+        required: false
+        description: "How many threads of terraform"
+        default: "10"
+      state_bucket:
+        type: string
+        required: false
+        description: "What S3 bucket to use for terraform state files"
+        default: "none"
+      state_bucket_region:
+        type: string
+        required: false
+        description: "What region the state bucket is in"
+        default: "cpe-control-repo-platform-ets-app-workloads-master-eu-west-1"
+      terraform_version:
+        type: string
+        required: false
+        description: "What version of terraform to use"
+        default: "~1.6.0"
+
+env:
+  SSH_AUTH_SOCK: /tmp/ssh_agent.sock
+  SSH_KEY: ${{ secrets.GH_ACTIONS_SERVICE_USER_SSH_KEY }}
+
+jobs:
+  plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+
+    steps:
+      - name: Check if on default branch
+        if: github.ref_name != github.event.repository.default_branch
+        run: |
+          job_summary="### Job failed :warning:\nThis workflow is intended to run only on the default branch (${{ github.event.repository.default_branch }}). Exiting because it is running on branch ${{ github.ref_name }}."
+          echo "$job_summary" >> $GITHUB_STEP_SUMMARY
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform_version }}
+
+      - name: Load environment-specific configuration
+        id: load_config
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const configPath = './config/pipeline.json';
+            const environment = "${{ inputs.environment }}";
+            const defaults = {
+              aws_region: "${{ inputs.aws_region }}",
+              code_owner: "${{ inputs.code_owner }}",
+              parallelism: "${{ inputs.parallelism }}",
+              state_bucket: "${{ inputs.state_bucket }}",
+              state_bucket_region: "${{ inputs.state_bucket_region }}"
+            };
+            let config = {};
+            if (fs.existsSync(configPath)) {
+              const fullConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+              if (!fullConfig[environment]) {
+                core.setFailed(`Configuration for the environment '${environment}' is not found.`);
+              } else if (!fullConfig[environment].role_to_assume) {
+                core.setFailed(`'role_to_assume' is not defined in the configuration for the given environment '${environment}'.`);
+              } else {
+                config = { ...defaults, ...fullConfig[environment] };
+              }
+            } else {
+              core.setFailed(`Configuration file not found at '${configPath}'`);
+            }
+            for (const key in config) {
+              core.setOutput(key, config[key]);
+            }
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ steps.load_config.outputs.aws_region }}
+          role-to-assume: ${{ steps.load_config.outputs.role_to_assume }}
+          role-session-name: GithubActionsSession
+
+      - name: Check Environment Configuration
+        id: check_env
+        run: |
+          ENV_FILE="./env/${{ inputs.environment }}.tfvars"
+          if [[ "${{ inputs.environment }}" != "none" ]] && [ ! -f "$ENV_FILE" ]; then
+            echo "Error: .tfvars file does not exist for the specified environment ${{ inputs.environment }}."
+            job_summary="### Job Failed :warning:\n**Error:** The required .tfvars file for the environment '${{ inputs.environment }}' does not exist. Please ensure the file is present in the './env/' directory and try again."
+            echo "$job_summary" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          echo "tfvars_path=$ENV_FILE" >> $GITHUB_ENV
+
+      - name: Set up SSH Private Key
+        run: |
+          mkdir -p /home/runner/.ssh
+          ssh-keyscan github.com >> /home/runner/.ssh/known_hosts
+          echo "${{ env.SSH_KEY }}" > /home/runner/.ssh/github_actions
+          chmod 600 /home/runner/.ssh/github_actions
+          ssh-agent -a $SSH_AUTH_SOCK > /dev/null
+          ssh-add /home/runner/.ssh/github_actions
+
+      - name: Terraform Init
+        run: |
+          ACCOUNT_ID=$(echo "${{ steps.load_config.outputs.role_to_assume }}" | cut -d':' -f5)
+          AWS_TF_STATE_PATH=$(echo "${{ steps.load_config.outputs.code_owner }}/aws/terraform/${{ github.event.repository.name }}/$ACCOUNT_ID/${{ inputs.environment }}/terraform.tfstate" | tr '[:upper:]' '[:lower:]')
+          terraform init \
+            -backend-config "bucket=${{ steps.load_config.outputs.state_bucket }}" \
+            -backend-config "region=${{ steps.load_config.outputs.state_bucket_region }}" \
+            -backend-config "key=$AWS_TF_STATE_PATH" \
+            -backend-config "encrypt=true"
+
+      - name: Terraform Plan
+        run: |
+          TFCMD="terraform plan -out ${{ github.event.repository.name }}-${{ inputs.environment }}.out"
+          if [ -n "${{ env.tfvars_path }}" ]; then
+            TFCMD="$TFCMD -var-file=${{ env.tfvars_path }}"
+          fi
+          echo "Running: $TFCMD"
+          eval $TFCMD
+
+      - name: Terraform Plan and Markdown Summary
+        id: plan
+        run: |
+          echo '```terraform' >> $GITHUB_STEP_SUMMARY
+          echo '### Terraform Plan' >> $GITHUB_STEP_SUMMARY
+          terraform show -no-color
+          ${{ github.event.repository.name }}-${{ inputs.environment }}.out | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Plan Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.repository.name }}-${{ inputs.environment }}
+          path: ./${{ github.event.repository.name }}-${{ inputs.environment }}.out
+
+  apply:
+    name: Terraform Destroy
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+      actions: read
+    needs: plan
+    environment: manual_approve
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform_version }}
+
+      - name: Load environment-specific configuration
+        id: load_config
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const configPath = './config/pipeline.json';
+            const environment = "${{ inputs.environment }}";
+            const defaults = {
+              aws_region: "${{ inputs.aws_region }}",
+              code_owner: "${{ inputs.code_owner }}",
+              parallelism: "${{ inputs.parallelism }}",
+              state_bucket: "${{ inputs.state_bucket }}",
+              state_bucket_region: "${{ inputs.state_bucket_region }}"
+            };
+            let config = {};
+            if (fs.existsSync(configPath)) {
+              const fullConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+              if (!fullConfig[environment]) {
+                core.setFailed(`Configuration for the environment '${environment}' is not found.`);
+              } else if (!fullConfig[environment].role_to_assume) {
+                core.setFailed(`'role_to_assume' is not defined in the configuration for the given environment '${environment}'.`);
+              } else {
+                config = { ...defaults, ...fullConfig[environment] };
+              }
+            } else {
+              core.setFailed(`Configuration file not found at '${configPath}'`);
+            }
+            for (const key in config) {
+              core.setOutput(key, config[key]);
+            }
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ steps.load_config.outputs.aws_region }}
+          role-to-assume: ${{ steps.load_config.outputs.role_to_assume }}
+          role-session-name: GithubActionsSession
+
+      - name: Set up SSH Private Key
+        run: |
+          mkdir -p /home/runner/.ssh
+          ssh-keyscan github.com >> /home/runner/.ssh/known_hosts
+          echo "${{ env.SSH_KEY }}" > /home/runner/.ssh/github_actions
+          chmod 600 /home/runner/.ssh/github_actions
+          ssh-agent -a $SSH_AUTH_SOCK > /dev/null
+          ssh-add /home/runner/.ssh/github_actions
+
+      - name: Terraform Init
+        run: |
+          ACCOUNT_ID=$(echo "${{ steps.load_config.outputs.role_to_assume }}" | cut -d':' -f5)
+          AWS_TF_STATE_PATH=$(echo "${{ steps.load_config.outputs.code_owner }}/aws/terraform/${{ github.event.repository.name }}/$ACCOUNT_ID/${{ inputs.environment }}/terraform.tfstate" | tr '[:upper:]' '[:lower:]')
+          terraform init \
+            -backend-config "bucket=${{ steps.load_config.outputs.state_bucket }}" \
+            -backend-config "region=${{ steps.load_config.outputs.state_bucket_region }}" \
+            -backend-config "key=$AWS_TF_STATE_PATH" \
+            -backend-config "encrypt=true"
+
+      - name: Download Terraform Plan output
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ github.event.repository.name }}-${{ inputs.environment }}
+
+      - name: Terraform Destroy
+        run: |
+          output=$(mktemp)
+          terraform destroy -auto-approve -no-color -parallelism=${{ steps.load_config.outputs.parallelism }} -var-file="${{ env.tfvars_path }}" 2>&1 | tee "$output"
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            echo "#### Terraform Destroy Failed" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat "$output" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit 1
+          else
+            echo "#### Terraform Destroy Succeeded" >> $GITHUB_STEP_SUMMARY
+            echo "Release Hash: $(echo '${{ github.sha }}' | cut -c1-7)" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat "$output" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi

@@ -1,4 +1,4 @@
-name: "Terraform Validate"
+name: Terraform Validate
 
 on:
   workflow_call:
@@ -6,7 +6,7 @@ on:
       base_dir:
         type: string
         default: "."
-      runs-on:
+      runs_on:
         type: string
         default: "ubuntu-latest"
       checkout_ref:
@@ -23,7 +23,7 @@ on:
         default: false
 
 env:
-  SSH_AUTH_SOCK: /temp/ssh_agent.sock
+  SSH_AUTH_SOCK: /tmp/ssh_agent.sock
   SSH_KEY: ${{ secrets.GH_ACTIONS_SERVICE_USER_SSH_KEY }}
 
 permissions:
@@ -31,9 +31,9 @@ permissions:
   issues: write
   pull-requests: write
 
-jobs: 
-  fmt: 
-    runs-on: ${{ inputs.runs-on }}
+jobs:
+  fmt:
+    runs-on: ${{ inputs.runs_on }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -46,16 +46,16 @@ jobs:
         working-directory: ${{ inputs.base_dir }}
         continue-on-error: ${{ inputs.allow_to_fail }}
 
-  validate: 
-    runs-on: ${{ inputs.runs-on }}
+  validate:
+    runs-on: ${{ inputs.runs_on }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.checkout_ref }}   
-      
+          ref: ${{ inputs.checkout_ref }}
+
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3.0.0
+        uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ inputs.terraform_version }}
 
@@ -67,7 +67,7 @@ jobs:
           chmod 600 /home/runner/.ssh/github_actions
           ssh-agent -a $SSH_AUTH_SOCK > /dev/null
           ssh-add /home/runner/.ssh/github_actions
-      
+
       - name: Terraform Validate
         run: |
           terraform init -backend=false
@@ -75,16 +75,16 @@ jobs:
         working-directory: ${{ inputs.base_dir }}
         continue-on-error: ${{ inputs.allow_to_fail }}
 
-  tflint: 
-    runs-on: ${{ inputs.runs-on }}
+  tflint:
+    runs-on: ${{ inputs.runs_on }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.checkout_ref }}   
-      
+          ref: ${{ inputs.checkout_ref }}
+
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3.0.0
+        uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ inputs.terraform_version }}
 
@@ -92,15 +92,15 @@ jobs:
         uses: terraform-linters/setup-tflint@v4
         with:
           version: ${{ inputs.tflint_version }}
-   
+
       - name: TFLint
         id: tflint
-        run: | 
-          if [ -f ${GITHUB_WORKSPACE}/.tflint.hcl ] && [ ! -f .tflint.hcl ] ; then
-            cp ${GITHUB_WORKSPACE}/.tflint.hcl .tflint.hcl
+        run: |
+          if [ -f "${GITHUB_WORKSPACE}/.tflint.hcl" ] && [ ! -f ".tflint.hcl" ]; then
+            cp "${GITHUB_WORKSPACE}/.tflint.hcl" .tflint.hcl
           fi
           tflint --init
-          if [ -f .tflint.hcl ]; then
+          if [ -f ".tflint.hcl" ]; then
             tflint -f compact --recursive --config "$(pwd)/.tflint.hcl"
           else
             tflint -f compact --recursive
@@ -108,17 +108,17 @@ jobs:
         working-directory: ${{ inputs.base_dir }}
 
   checkov:
-    runs-on: ${{ inputs.runs-on }}
+    runs-on: ${{ inputs.runs_on }}
     continue-on-error: ${{ inputs.allow_to_fail }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.checkout_ref }}   
+          ref: ${{ inputs.checkout_ref }}
 
-      - name: Checkov Github Action
+      - name: Checkov GitHub Action
         uses: bridgecrewio/checkov-action@v12
-        with: 
+        with:
           quiet: true
           output_format: cli,sarif
           output_file_path: console,checkov-results.json
