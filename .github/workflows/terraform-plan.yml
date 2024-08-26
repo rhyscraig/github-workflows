@@ -22,6 +22,11 @@ on:
         required: false
         description: "What S3 bucket to use for terraform state files"
         default: "terraform-tfstate-bucket-395101865577"
+      state_bucket_path:
+        type: string
+        required: false
+        description: "The path to the state file"
+        default: "core/terraform.tfstate"
       state_bucket_region:
         type: string
         required: false
@@ -121,7 +126,7 @@ jobs:
       - name: Terraform Init
         run: |
           ACCOUNT_ID=$(echo "${{ steps.load_config.outputs.role_to_assume }}" | cut -d':' -f5)
-          AWS_TF_STATE_PATH=$(echo "${{ steps.load_config.outputs.code_owner }}/aws/terraform/${{ github.event.repository.name }}/$ACCOUNT_ID/${{ inputs.environment }}/terraform.tfstate" | tr '[:upper:]' '[:lower:]')
+          AWS_TF_STATE_PATH="${{ steps.load_config.outputs.state_bucket_path }}" # Ensure this path is correct and has no leading/trailing slashes
           terraform init \
             -backend-config "bucket=${{ steps.load_config.outputs.state_bucket }}" \
             -backend-config "region=${{ steps.load_config.outputs.state_bucket_region }}" \
