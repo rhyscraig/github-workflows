@@ -40,7 +40,7 @@ on:
 
 env:
   SSH_AUTH_SOCK: /tmp/ssh_agent.sock
-  SSH_KEY: ${{ secrets.GH_ACTIONS_SERVICE_USER_SSH_KEY }}
+  SSH_KEY: ${{ secrets.GH_ACTIONS_SERVICE_USER_SSH_KEY }} #
 
 jobs:
   plan:
