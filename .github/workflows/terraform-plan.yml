@@ -108,14 +108,14 @@ jobs:
             echo "tfvars_path=" >> $GITHUB_ENV
           fi
 
-      - name: Set up SSH Private Key
+      - name: Set up SSH private key
         run: |
           mkdir -p /home/runner/.ssh
           ssh-keyscan github.com >> /home/runner/.ssh/known_hosts
-          echo "${{ env.SSH_KEY }}" > /home/runner/.ssh/github_actions
+          echo "${{ env.SSH_KEY }}" | tr -d '\r' > /home/runner/.ssh/github_actions
           chmod 600 /home/runner/.ssh/github_actions
-          ssh-agent -a $SSH_AUTH_SOCK > /dev/null
-          ssh-add /home/runner/.ssh/github_actions
+          eval $(ssh-agent -s)
+          ssh-add /home/runner/.ssh/github_actions        
 
       - name: Terraform Init
         run: |
