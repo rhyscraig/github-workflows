@@ -42,6 +42,12 @@ env:
   SSH_AUTH_SOCK: /tmp/ssh_agent.sock
   SSH_KEY: ${{ secrets.GH_ACTIONS_SERVICE_USER_SSH_KEY }}
 
+  AWS_DEFAULT_REGION: eu-west-2
+  AWS_REGION: eu-west-2
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+  tfvars_path: ./env/prd.tfvars
 jobs:
   plan:
     name: Terraform Plan
@@ -125,8 +131,17 @@ jobs:
 
       - name: Terraform Init
         run: |
+          # Extract values from environment or configuration
           ACCOUNT_ID=$(echo "${{ steps.load_config.outputs.role_to_assume }}" | cut -d':' -f5)
-          AWS_TF_STATE_PATH="${{ steps.load_config.outputs.state_bucket_path }}" # Ensure this path is correct and has no leading/trailing slashes
+          AWS_TF_STATE_PATH="${{ steps.load_config.outputs.state_bucket_path }}" # Ensure this is correct and not empty
+          
+          # Ensure the path variable is not empty
+          if [ -z "$AWS_TF_STATE_PATH" ]; then
+            echo "Error: AWS_TF_STATE_PATH is empty. Please check your state_bucket_path configuration."
+            exit 1
+          fi
+          
+          # Initialize Terraform
           terraform init \
             -backend-config "bucket=${{ steps.load_config.outputs.state_bucket }}" \
             -backend-config "region=${{ steps.load_config.outputs.state_bucket_region }}" \
