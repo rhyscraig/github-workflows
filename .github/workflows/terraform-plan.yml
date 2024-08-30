@@ -12,16 +12,6 @@ on:
         type: string
         required: false
         description: "Which organization owns the code to deploy"
-      dynamodb_table:
-        type: string
-        required: false
-        description: "Dynamodb state locking table"
-        default: "tf-lock-state-ddb-table"
-      dynamodb_table_region:
-        type: string
-        required: false
-        description: "Dynamodb table region"
-        default: "eu-west-2"
       environment:
         type: string
         required: true
@@ -143,7 +133,6 @@ jobs:
           # Extract values from environment or configuration
           ACCOUNT_ID=$(echo "${{ steps.load_config.outputs.role_to_assume }}" | cut -d':' -f5)
           AWS_TF_STATE_PATH="${{ inputs.state_bucket_path }}" # Ensure this is correct and not empty
-          DYNAMODB_TABLE="${{ inputs.dynamodb_table }}" # Correct syntax for variable assignment
           
           # Ensure the path variable is not empty
           if [ -z "$AWS_TF_STATE_PATH" ]; then
@@ -156,7 +145,6 @@ jobs:
             -backend-config "bucket=${{ steps.load_config.outputs.state_bucket }}" \
             -backend-config "region=${{ steps.load_config.outputs.state_bucket_region }}" \
             -backend-config "key=$AWS_TF_STATE_PATH" \
-            -backend-config "dynamodb_table=$DYNAMODB_TABLE" \
             -backend-config "encrypt=true"        
 
       - name: Terraform Plan
