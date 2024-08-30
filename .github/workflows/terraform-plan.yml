@@ -21,7 +21,7 @@ on:
         type: string
         required: false
         description: "Dynamodb table region"
-        default: "us-east-1"
+        default: "eu-west-2"
       environment:
         type: string
         required: true
@@ -41,7 +41,7 @@ on:
         type: string
         required: false
         description: "What region the state bucket is in"
-        default: "us-east-1"
+        default: "eu-west-2"
       terraform_version:
         type: string
         required: false
