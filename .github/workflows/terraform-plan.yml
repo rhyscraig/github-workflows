@@ -17,6 +17,11 @@ on:
         required: true
         description: "What AWS env to deploy to"
         default: "prd"
+      parallelism:
+        type: string
+        required: false
+        description: "How many threads of terraform"
+        default: "10"
       state_bucket:
         type: string
         required: false
