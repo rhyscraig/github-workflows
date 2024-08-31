@@ -132,26 +132,26 @@ jobs:
           echo "${{ env.SSH_KEY }}" | tr -d '\r' > /home/runner/.ssh/github_actions
           chmod 600 /home/runner/.ssh/github_actions
           eval $(ssh-agent -s)
-          ssh-add /home/runner/.ssh/github_actions        
+          ssh-add /home/runner/.ssh/github_actions
 
       - name: Terraform Init
         run: |
           # Extract values from environment or configuration
           ACCOUNT_ID=$(echo "${{ steps.load_config.outputs.role_to_assume }}" | cut -d':' -f5)
           AWS_TF_STATE_PATH="${{ inputs.state_bucket_path }}" # Ensure this is correct and not empty
-          
+
           # Ensure the path variable is not empty
           if [ -z "$AWS_TF_STATE_PATH" ]; then
             echo "Error: AWS_TF_STATE_PATH is empty. Please check your state_bucket_path configuration."
             exit 1
           fi
-          
+
           # Initialize Terraform
           terraform init \
             -backend-config "bucket=${{ steps.load_config.outputs.state_bucket }}" \
             -backend-config "region=${{ steps.load_config.outputs.state_bucket_region }}" \
             -backend-config "key=$AWS_TF_STATE_PATH" \
-            -backend-config "encrypt=true"        
+            -backend-config "encrypt=true"
 
       - name: Terraform Plan
         run: |
@@ -181,7 +181,6 @@ jobs:
         run: |
           terraform show -json ${{ github.event.repository.name }}-${{ inputs.environment }}.out | tee ${{ github.event.repository.name }}-${{ inputs.environment }}.json
 
-
   apply:
     name: Terraform Apply
     runs-on: ubuntu-latest
@@ -192,27 +191,15 @@ jobs:
     needs: plan
     environment: manual_approval
     steps:
-      # Cache Terraform modules and providers
-      - name: Cache Terraform Modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.terraform.d/plugin-cache
-            .terraform
-          key: ${{ runner.os }}-terraform-${{ hashFiles('**/*.tf') }}
-          restore-keys: |
-            ${{ runner.os }}-terraform-
+      - name: Check out repo
+        uses: actions/checkout@v4
 
-      # Check out repo
-      - uses: actions/checkout@v4
-      
-      # Set up terraform
-      - uses: hashicorp/setup-terraform@v3
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ inputs.terraform_version }}
 
-      # Load environment configurations
-      - name: Load environment-specific configuration
+      - name: Load environment configurations
         id: load_config
         uses: actions/github-script@v7
         with:
@@ -235,11 +222,11 @@ jobs:
               } else if (!fullConfig[environment].role_to_assume) {
                 core.setFailed(`'role_to_assume' is not defined in the configuration for the given environment '${environment}'.`);
               } else {
-                config = { ...defaults, ...fullConfig[environment] }; // Merge defaults with environment-specific config
+                config = { ...defaults, ...fullConfig[environment] };
               }
             } else {
               core.setFailed(`Configuration file not found at '${configPath}'`);
-            } 
+            }
             for (const key in config) {
               if (config[key]) {
                 core.setOutput(key, config[key]);
@@ -247,7 +234,6 @@ jobs:
               }
             }
 
-      # Authenticate via OIDC to AWS
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -255,34 +241,49 @@ jobs:
           role-to-assume: ${{ steps.load_config.outputs.role_to_assume }}
           role-session-name: GithubActionsSession
 
-      # Add SSH key to allow us to clone
-      - name: Set up SSH Private Key
+      - name: Check Environment Configuration
+        id: check_env
+        run: |
+          ENVIRONMENT="${{ inputs.environment }}"
+          ENV_FILE="./env/$ENVIRONMENT.tfvars"
+          if [[ "$ENVIRONMENT" != "none" ]] && [ ! -f "$ENV_FILE" ]; then
+            echo "Error: .tfvars file does not exist for the specified environment $ENVIRONMENT."
+            echo "### Job Failed :warning:\n**Error:** The required .tfvars file for the environment '$ENVIRONMENT' does not exist. Please ensure the file is present in the './env/' directory and try again." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          elif [[ "$ENVIRONMENT" != "NONE" ]]; then
+            echo "tfvars_path=$ENV_FILE" >> $GITHUB_ENV
+          else
+            echo "tfvars_path=" >> $GITHUB_ENV
+          fi
+
+      - name: Set up SSH private key
         run: |
           mkdir -p /home/runner/.ssh
           ssh-keyscan github.com >> /home/runner/.ssh/known_hosts
-          echo "${{ env.SSH_KEY }}" > /home/runner/.ssh/github_actions
+          echo "${{ env.SSH_KEY }}" | tr -d '\r' > /home/runner/.ssh/github_actions
           chmod 600 /home/runner/.ssh/github_actions
-          ssh-agent -a $SSH_AUTH_SOCK > /dev/null
+          eval $(ssh-agent -s)
           ssh-add /home/runner/.ssh/github_actions
 
-      # Download Terraform Plan from Artifact
-      - name: Download Plan Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ github.event.repository.name }}-${{ inputs.environment }}
-
-      # Initialise Terraform in path
       - name: Terraform Init
         run: |
+          # Extract values from environment or configuration
           ACCOUNT_ID=$(echo "${{ steps.load_config.outputs.role_to_assume }}" | cut -d':' -f5)
-          AWS_TF_STATE_PATH=$(echo "${{ steps.load_config.outputs.code_owner }}/aws/terraform/${{ github.event.repository.name }}/$ACCOUNT_ID/${{ inputs.environment }}/terraform.tfstate" | tr '[:upper:]' '[:lower:]')
+          AWS_TF_STATE_PATH="${{ inputs.state_bucket_path }}" # Ensure this is correct and not empty
+
+          # Ensure the path variable is not empty
+          if [ -z "$AWS_TF_STATE_PATH" ]; then
+            echo "Error: AWS_TF_STATE_PATH is empty. Please check your state_bucket_path configuration."
+            exit 1
+          fi
+
+          # Initialize Terraform
           terraform init \
             -backend-config "bucket=${{ steps.load_config.outputs.state_bucket }}" \
             -backend-config "region=${{ steps.load_config.outputs.state_bucket_region }}" \
             -backend-config "key=$AWS_TF_STATE_PATH" \
             -backend-config "encrypt=true"
 
-      # Run Terraform Apply
       - name: Terraform Apply
         run: |
           echo "Starting Terraform Apply..."
