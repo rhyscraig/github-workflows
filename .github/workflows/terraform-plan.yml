@@ -174,34 +174,3 @@ jobs:
         id: convert_plan
         run: |
           terraform show -json ${{ github.event.repository.name }}-${{ inputs.environment }}.out | tee ${{ github.event.repository.name }}-${{ inputs.environment }}.json
-
-      # Uncomment these steps if needed
-      # - name: Upload Scan Artifacts
-      #   uses: rapid7/insightcloudsec-actions@v2
-      #   continue-on-error: true
-      #   id: ics_scan
-      #   with:
-      #     api_key: ${{ secrets.RAPID7_API_KEY }}
-      #     base_url: ${{ secrets.RAPID7_BASE_URL }}
-      #     config_name: IaC Analyzer - Global Use
-      #     target: ${{ github.event.repository.name }}-${{ inputs.environment }}.json
-
-      # - name: Upload scan artifact
-      #   uses: actions/upload-artifact@v4
-      #   with:
-      #     name: mimics-scan-artifacts
-      #     path: |
-      #       ./log/mimics*.log
-      #       ./ics_scan.*
-
-      # - name: Extract Report from SARIF
-      #   id: extract_report
-      #   run: |
-      #     jq '.runs[] | .results' ics_scan.sarif > ics_scan.json
-
-      # - name: Append ICS Scan Results to Job Summary
-      #   run: |
-      #     echo '```json' >> $GITHUB_STEP_SUMMARY
-      #     echo '### ICS Scan Results' >> $GITHUB_STEP_SUMMARY
-      #     cat ./ics_scan.json >> $GITHUB_STEP_SUMMARY
-      #     echo '```' >> $GITHUB_STEP_SUMMARY
