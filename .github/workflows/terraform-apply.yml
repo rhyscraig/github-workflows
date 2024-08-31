@@ -54,6 +54,135 @@ env:
   tfvars_path: ./env/prd.tfvars
 
 jobs:
+  plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      # Check out repo
+      - uses: actions/checkout@v4
+      
+      # Set up terraform
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform_version }}
+
+      # Load environment configurations
+      - name: Load environment-specific configuration
+        id: load_config
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const configPath = './config/pipeline.json';
+            const environment = "${{ inputs.environment }}";
+            const defaults = {
+              aws_region: "${{ inputs.aws_region }}",
+              code_owner: "${{ inputs.code_owner }}",
+              parallelism: "${{ inputs.parallelism }}",
+              state_bucket: "${{ inputs.state_bucket }}",
+              state_bucket_region: "${{ inputs.state_bucket_region }}"
+            };
+            let config = {};
+            if (fs.existsSync(configPath)) {
+              const fullConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+              if (!fullConfig[environment]) {
+                core.setFailed(`Configuration for the environment '${environment}' is not found.`);
+              } else if (!fullConfig[environment].role_to_assume) {
+                core.setFailed(`'role_to_assume' is not defined in the configuration for the given environment '${environment}'.`);
+              } else {
+                config = { ...defaults, ...fullConfig[environment] }; // Merge defaults with environment-specific config
+              }
+            } else {
+              core.setFailed(`Configuration file not found at '${configPath}'`);
+            } 
+            for (const key in config) {
+              if (config[key]) {
+                core.setOutput(key, config[key]);
+                console.log(`Set ${key}: ${config[key]}`);
+              }
+            }
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ steps.load_config.outputs.aws_region }}
+          role-to-assume: ${{ steps.load_config.outputs.role_to_assume }}
+          role-session-name: GithubActionsSession
+
+      - name: Check Environment Configuration
+        id: check_env
+        run: |
+          ENVIRONMENT="${{ inputs.environment }}"
+          ENV_FILE="./env/$ENVIRONMENT.tfvars"
+          if [[ "$ENVIRONMENT" != "none" ]] && [ ! -f "$ENV_FILE" ]; then
+            echo "Error: .tfvars file does not exist for the specified environment $ENVIRONMENT."
+            echo "### Job Failed :warning:\n**Error:** The required .tfvars file for the environment '$ENVIRONMENT' does not exist. Please ensure the file is present in the './env/' directory and try again." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          elif [[ "$ENVIRONMENT" != "NONE" ]]; then
+            echo "tfvars_path=$ENV_FILE" >> $GITHUB_ENV
+          else
+            echo "tfvars_path=" >> $GITHUB_ENV
+          fi
+
+      - name: Set up SSH private key
+        run: |
+          mkdir -p /home/runner/.ssh
+          ssh-keyscan github.com >> /home/runner/.ssh/known_hosts
+          echo "${{ env.SSH_KEY }}" | tr -d '\r' > /home/runner/.ssh/github_actions
+          chmod 600 /home/runner/.ssh/github_actions
+          eval $(ssh-agent -s)
+          ssh-add /home/runner/.ssh/github_actions        
+
+      - name: Terraform Init
+        run: |
+          # Extract values from environment or configuration
+          ACCOUNT_ID=$(echo "${{ steps.load_config.outputs.role_to_assume }}" | cut -d':' -f5)
+          AWS_TF_STATE_PATH="${{ inputs.state_bucket_path }}" # Ensure this is correct and not empty
+          
+          # Ensure the path variable is not empty
+          if [ -z "$AWS_TF_STATE_PATH" ]; then
+            echo "Error: AWS_TF_STATE_PATH is empty. Please check your state_bucket_path configuration."
+            exit 1
+          fi
+          
+          # Initialize Terraform
+          terraform init \
+            -backend-config "bucket=${{ steps.load_config.outputs.state_bucket }}" \
+            -backend-config "region=${{ steps.load_config.outputs.state_bucket_region }}" \
+            -backend-config "key=$AWS_TF_STATE_PATH" \
+            -backend-config "encrypt=true"        
+
+      - name: Terraform Plan
+        run: |
+          TFCMD="terraform plan -out ${{ github.event.repository.name }}-${{ inputs.environment }}.out"
+          if [ -n "${{ env.tfvars_path }}" ]; then
+            TFCMD="$TFCMD -var-file=${{ env.tfvars_path }}"
+          fi
+          echo "Running: $TFCMD"
+          eval $TFCMD
+
+      - name: Terraform Plan and Markdown Summary
+        id: plan
+        run: |
+          echo '```terraform' >> $GITHUB_STEP_SUMMARY
+          echo '### Terraform Plan' >> $GITHUB_STEP_SUMMARY
+          terraform show -no-color ${{ github.event.repository.name }}-${{ inputs.environment }}.out | tee -a $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Plan Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.repository.name }}-${{ inputs.environment }}
+          path: ./${{ github.event.repository.name }}-${{ inputs.environment }}.out
+
+      - name: Convert Terraform Plan to JSON
+        id: convert_plan
+        run: |
+          terraform show -json ${{ github.event.repository.name }}-${{ inputs.environment }}.out | tee ${{ github.event.repository.name }}-${{ inputs.environment }}.json
+
   apply:
     name: Terraform Apply
     runs-on: ubuntu-latest
@@ -154,7 +283,13 @@ jobs:
             -backend-config "bucket=${{ steps.load_config.outputs.state_bucket }}" \
             -backend-config "region=${{ steps.load_config.outputs.state_bucket_region }}" \
             -backend-config "key=$AWS_TF_STATE_PATH" \
-            -backend-config "encrypt=true"        
+            -backend-config "encrypt=true"    
+            
+      # Download Terraform Plan output
+      - name: Download Terraform Plan output
+        uses: actions/downoad-artifact@v4
+        with: 
+          name: ${{ github.event.repository.name }}-${{ inputs.environment }}
 
       - name: Terraform Apply
         run: |
