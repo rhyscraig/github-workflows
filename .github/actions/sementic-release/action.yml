@@ -1,0 +1,41 @@
+name: Semantic Release
+
+on:
+  push:
+    branches:
+      - master
+      - main
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Semantic Release and dependencies
+        run: |
+          npm install -g semantic-release@v13 \
+            @semantic-release/commit-analyzer@v13 \
+            @semantic-release/release-notes-generator@v14 \
+            @semantic-release/changelog@v6 \
+            @semantic-release/npm@v10 \
+            @semantic-release/git@v10 \
+            @semantic-release/github@v10 \
+            @semantic-release/exec@v6 \
+            conventional-changelog-conventionalcommits@v7 \
+            semantic-release-major-tag
+        shell: bash
+
+      - name: Copy standard releaserc config
+        run: cp ${{ github.action_path }}/config/.releaserc .
+        shell: bash
+
+      - name: Run Semantic Release
+        run: semantic-release
+        shell: bash

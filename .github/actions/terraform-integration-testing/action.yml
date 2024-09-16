@@ -1,0 +1,32 @@
+name: "Terraform Integration Testing"
+
+inputs:
+  role_to_assume:
+    required: true
+    description: "What ARN to assume inside of AWS for OIDC"
+    default: "arn:aws:iam::395101865577:role/aws-cb-github-actions-deploy-role"
+  terraform_versions:
+    required: false
+    description: "Waht version of terraform tot use"
+    default: "~1.6.0"
+  aws_region:
+    required: false
+    description: What region do we wish to run AWS auth in
+    default: "eu-west-2"
+  ssh_key:
+    required: false
+    description: "GH actions service user SSH key"
+    default: ""
+  enable_ci_testing:
+    required: false
+    description: "If true then we run CI testing"
+    default: "true"
+  parallelism:
+    required: false
+    description: "How many threads of Terraform we wish to run"
+    default: 10
+
+runs:
+  using: "composite"
+  steps:
+    - uses: hashicorp/setup-terraform@v3

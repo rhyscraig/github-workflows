@@ -1,20 +1,25 @@
-branches: ["master, "main", "origin/master", "origin/main"]
+branches:
+  - master
+  - main
+  - "origin/master"
+  - "origin/main"
+
 debug: true
 ci: true
 dryRun: false
+
 plugins:
-    - - "@semantic-release/commit-analyzer"
-      - preset: conventalcommits
-    - - "@semantic-release/release-notes-generator"
-      - preset: conventionalcommits
-        presetConfigs:
-            commitUrlFormat: "{{host}}/{{owner}}/{{repository}}/commit/{{hash}}
-            compareUrlFormat: "{{host}}/{{owner}}/{{repository}}/compare/{{previousTag}}...{{currentTag}}"
-    - - "@semantic-release/github"
-      - successComment: false
-        failTitle: false
-    - - "@semantic-release/git"
-      - message: "Release "{nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
-    - "semantic-release-major-tag"
-    - - "@semantic-release/exec"
-      - generateNotesCmd: 'echo "${nextRelease.version}" > version.env'
+  - "@semantic-release/commit-analyzer"
+  - "@semantic-release/release-notes-generator"
+    preset: "conventionalcommits"
+    presetConfig:
+      commitUrlFormat: "{{host}}/{{owner}}/{{repository}}/commit/{{hash}}"
+      compareUrlFormat: "{{host}}/{{owner}}/{{repository}}/compare/{{previousTag}}...{{currentTag}}"
+  - "@semantic-release/github"
+    successComment: false
+    failTitle: false
+  - "@semantic-release/git"
+    message: "Release {nextRelease.version} [skip ci]\n\n{nextRelease.notes}"
+  - "semantic-release-major-tag"
+  - "@semantic-release/exec"
+    generateNotesCmd: 'echo "${nextRelease.version}" > version.env'
